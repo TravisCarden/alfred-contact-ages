@@ -1,0 +1,2 @@
+# Build artifacts get attached to GitHub releases, not committed to the repo.
+*.alfredworkflow
