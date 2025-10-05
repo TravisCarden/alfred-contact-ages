@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>bundleid</key>
+	<string>com.traviscarden.alfred.workflows.contact-ages</string>
+	<key>category</key>
+	<string>Productivity</string>
+	<key>connections</key>
+	<dict>
+		<key>E4C8159F-01ED-4D9D-A2FF-4066D9DA4B96</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>32427D2E-51F4-4161-B877-083391C0D03C</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+	</dict>
+	<key>createdby</key>
+	<string>Travis Carden</string>
+	<key>description</key>
+	<string>View contact ages and upcoming birthdays directly in Alfred.</string>
+	<key>disabled</key>
+	<false/>
+	<key>name</key>
+	<string>Contact Ages</string>
+	<key>objects</key>
+	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>concurrently</key>
+				<false/>
+				<key>escaping</key>
+				<integer>102</integer>
+				<key>script</key>
+				<string>open "$1"</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>type</key>
+				<integer>0</integer>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.script</string>
+			<key>uid</key>
+			<string>32427D2E-51F4-4161-B877-083391C0D03C</string>
+			<key>version</key>
+			<integer>2</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>alfredfiltersresults</key>
+				<false/>
+				<key>alfredfiltersresultsmatchmode</key>
+				<integer>0</integer>
+				<key>argumenttreatemptyqueryasnil</key>
+				<true/>
+				<key>argumenttrimmode</key>
+				<integer>0</integer>
+				<key>argumenttype</key>
+				<integer>0</integer>
+				<key>escaping</key>
+				<integer>68</integer>
+				<key>keyword</key>
+				<string>age</string>
+				<key>queuedelaycustom</key>
+				<integer>3</integer>
+				<key>queuedelayimmediatelyinitially</key>
+				<true/>
+				<key>queuedelaymode</key>
+				<integer>0</integer>
+				<key>queuemode</key>
+				<integer>1</integer>
+				<key>runningsubtext</key>
+				<string></string>
+				<key>script</key>
+				<string>#!/usr/bin/env python3
+
+import sys
+import subprocess
+import plistlib
+from datetime import date, datetime
+import json
+from pathlib import Path
+from calendar import monthrange
+
+def calculate_age_detail(birthdate):
+    """Return (years, months, days) since birthdate."""
+    today = date.today()
+    years = today.year - birthdate.year
+    months = today.month - birthdate.month
+    days = today.day - birthdate.day
+
+    if days &lt; 0:
+        # Borrow days from previous month.
+        months -= 1
+        prev_month = today.month - 1 or 12
+        prev_year = today.year if today.month != 1 else today.year - 1
+        days += monthrange(prev_year, prev_month)[1]
+
+    if months &lt; 0:
+        months += 12
+        years -= 1
+
+    return years, months, days
+
+def time_until_next_birthday(birthdate):
+    """Return (months, days) until the next birthday from today."""
+    today = date.today()
+    # Compute this year's birthday.
+    next_bday = birthdate.replace(year=today.year)
+    if next_bday &lt; today:
+        next_bday = birthdate.replace(year=today.year + 1)
+
+    months = next_bday.month - today.month
+    days = next_bday.day - today.day
+
+    if days &lt; 0:
+        months -= 1
+        prev_month = (today.month % 12) + 1
+        prev_year = today.year if prev_month != 1 else today.year - 1
+        days += monthrange(prev_year, prev_month)[1]
+
+    if months &lt; 0:
+        months += 12
+
+    return months, days
+
+query = sys.argv[1] if len(sys.argv) &gt; 1 else ""
+
+# Spotlight search: only return AddressBook person contacts.
+cmd = [
+    "mdfind",
+    "-onlyin",
+    str(Path.home() / "Library/Application Support/AddressBook"),
+    f'kMDItemDisplayName == "*{query}*"c &amp;&amp; kMDItemContentTypeTree == "com.apple.addressbook.person"'
+]
+results = subprocess.run(cmd, capture_output=True, text=True)
+paths = [line.strip() for line in results.stdout.splitlines() if line.strip()]
+
+items = []
+
+for path in paths:
+    try:
+        with open(path, "rb") as f:
+            data = plistlib.load(f)
+    except Exception:
+        continue
+
+    first = data.get("First", "")
+    last = data.get("Last", "")
+
+    # Skip placeholder contacts without a first or last name.
+    if not first and not last:
+        continue
+
+    name = f"{first} {last}".strip()
+
+    birthday = data.get("Birthday")
+    subtitle = "No birthday set"
+    if isinstance(birthday, datetime):
+        birthday = birthday.date()
+    if isinstance(birthday, date):
+        years, months, days = calculate_age_detail(birthday)
+        months_until, days_until = time_until_next_birthday(birthday)
+
+        # Determine next birthday text.
+        if months_until == 0 and days_until == 0:
+            next_bday_text = "🎉 Today!"
+        else:
+            next_bday_text = f"Next birthday in {months_until}m {days_until}d"
+
+        subtitle = (
+            f"Born {birthday.strftime('%B %d, %Y')} "
+            f"(Age: {years}y {months}m {days}d; {next_bday_text})"
+        )
+
+    item = {
+        "title": name,
+        "subtitle": subtitle,
+        "arg": path,  # Used for ENTER action (open in Contacts.app).
+        "uid": path,
+        "text": {
+            "copy": f"{name} — {subtitle}",
+            "largetype": f"{name} — {subtitle}"
+        }
+    }
+    items.append(item)
+
+if not items:
+    items = [{"title": "No matches", "subtitle": f"No contacts for '{query}'"}]
+
+print(json.dumps({"items": items}))
+</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>subtext</key>
+				<string></string>
+				<key>title</key>
+				<string></string>
+				<key>type</key>
+				<integer>9</integer>
+				<key>withspace</key>
+				<true/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.input.scriptfilter</string>
+			<key>uid</key>
+			<string>E4C8159F-01ED-4D9D-A2FF-4066D9DA4B96</string>
+			<key>version</key>
+			<integer>3</integer>
+		</dict>
+	</array>
+	<key>readme</key>
+	<string>Displays the ages and upcoming birthdays of your macOS Contacts directly in Alfred. Search by name, view age details inline, and open a contact instantly in Contacts.app.</string>
+	<key>uidata</key>
+	<dict>
+		<key>32427D2E-51F4-4161-B877-083391C0D03C</key>
+		<dict>
+			<key>note</key>
+			<string>Press ENTER to open contact in Contacts.app.</string>
+			<key>xpos</key>
+			<real>335</real>
+			<key>ypos</key>
+			<real>150</real>
+		</dict>
+		<key>E4C8159F-01ED-4D9D-A2FF-4066D9DA4B96</key>
+		<dict>
+			<key>xpos</key>
+			<real>140</real>
+			<key>ypos</key>
+			<real>150</real>
+		</dict>
+	</dict>
+	<key>userconfigurationconfig</key>
+	<array/>
+	<key>variablesdontexport</key>
+	<array/>
+	<key>version</key>
+	<string>0.9.0</string>
+	<key>webaddress</key>
+	<string>https://github.com/TravisCarden/alfred-contact-ages</string>
+</dict>
+</plist>
